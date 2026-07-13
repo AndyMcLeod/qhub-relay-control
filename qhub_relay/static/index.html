@@ -1,0 +1,394 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Q-Hub Relay Control</title>
+<style>
+  :root {
+    --bg: #10161c;
+    --panel: #1a232c;
+    --panel-border: #2b3844;
+    --text: #e8edf2;
+    --text-dim: #8ea0ae;
+    --accent: #3aa0ff;
+    --on: #35c86a;
+    --off: #55636e;
+    --danger: #ff5a5f;
+    --warn: #e6b93d;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+  }
+  header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--panel-border);
+    background: var(--panel);
+  }
+  h1 {
+    font-size: 1.25rem;
+    margin: 0;
+    font-weight: 600;
+  }
+  .status-line {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 0.9rem;
+    color: var(--text-dim);
+  }
+  .dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--off);
+    flex: none;
+  }
+  .dot.ok { background: var(--on); box-shadow: 0 0 8px var(--on); }
+  .dot.bad { background: var(--danger); box-shadow: 0 0 8px var(--danger); }
+  .device-addr {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.85rem;
+  }
+  .device-addr input {
+    width: 120px;
+    background: #0d1318;
+    border: 1px solid var(--panel-border);
+    color: var(--text);
+    border-radius: 6px;
+    padding: 4px 6px;
+    font-size: 0.85rem;
+  }
+  main {
+    max-width: 980px;
+    margin: 0 auto;
+    padding: 20px;
+  }
+  .error-banner {
+    display: none;
+    background: #3a1f22;
+    border: 1px solid var(--danger);
+    color: #ffb3b5;
+    padding: 10px 14px;
+    border-radius: 8px;
+    margin-bottom: 16px;
+    font-size: 0.9rem;
+  }
+  .error-banner.show { display: block; }
+  .global-actions {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+  }
+  .global-actions button {
+    flex: 1;
+    min-width: 140px;
+  }
+  button {
+    cursor: pointer;
+    border: none;
+    border-radius: 8px;
+    padding: 10px 14px;
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--text);
+    background: #26333d;
+    transition: transform 0.05s ease, background 0.15s ease;
+  }
+  button:hover { background: #30414d; }
+  button:active { transform: scale(0.97); }
+  button:disabled { opacity: 0.45; cursor: not-allowed; }
+  button.primary { background: var(--accent); color: #04121e; }
+  button.primary:hover { background: #55b0ff; }
+  button.on-btn { background: #1b3d29; color: var(--on); }
+  button.on-btn:hover { background: #204a30; }
+  button.off-btn { background: #3d2020; color: var(--danger); }
+  button.off-btn:hover { background: #4a2626; }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 14px;
+  }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    border-radius: 12px;
+    padding: 16px;
+  }
+  .card-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 10px;
+    gap: 8px;
+  }
+  .card-head input.name {
+    background: transparent;
+    border: none;
+    border-bottom: 1px dashed transparent;
+    color: var(--text);
+    font-size: 1.05rem;
+    font-weight: 600;
+    padding: 2px 0;
+    width: 100%;
+  }
+  .card-head input.name:hover,
+  .card-head input.name:focus {
+    border-bottom-color: var(--accent);
+    outline: none;
+  }
+  .state-pill {
+    font-size: 0.75rem;
+    padding: 3px 10px;
+    border-radius: 999px;
+    background: #26333d;
+    color: var(--text-dim);
+    white-space: nowrap;
+    flex: none;
+  }
+  .state-pill.on { background: #1b3d29; color: var(--on); }
+  .state-pill.off { background: #26333d; color: var(--off); }
+  .state-pill.pulsing { background: #3a3320; color: var(--warn); }
+  .btn-row {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 10px;
+  }
+  .btn-row button { flex: 1; }
+  .pulse-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+  .pulse-row input[type=number] {
+    width: 70px;
+    background: #0d1318;
+    border: 1px solid var(--panel-border);
+    color: var(--text);
+    border-radius: 6px;
+    padding: 8px;
+    font-size: 0.9rem;
+  }
+  .pulse-row button { flex: 1; }
+  footer {
+    text-align: center;
+    color: var(--text-dim);
+    font-size: 0.8rem;
+    padding: 24px 20px 40px;
+  }
+  .voltage {
+    font-variant-numeric: tabular-nums;
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>Q-Hub Relay Control</h1>
+  <div class="status-line">
+    <span class="dot" id="conn-dot"></span>
+    <span id="conn-text">connecting&hellip;</span>
+    <span id="voltage" class="voltage"></span>
+    <span class="device-addr">
+      <span>Device:</span>
+      <input id="device-ip" type="text" spellcheck="false">
+      <button id="save-ip">Set</button>
+    </span>
+  </div>
+</header>
+
+<main>
+  <div class="error-banner" id="error-banner"></div>
+
+  <div class="global-actions">
+    <button class="primary" id="all-on">All On</button>
+    <button class="off-btn" id="all-off">All Off</button>
+  </div>
+
+  <div class="grid" id="channels"></div>
+</main>
+
+<footer>
+  Q-Hub Relay Control &middot; talks to the OTAQ Q-Hub over its native Ethernet protocol on port 23
+</footer>
+
+<script>
+const POLL_MS = 1500;
+let renaming = new Set(); // channel indices currently being edited, skip re-render of their name field
+
+async function api(path, opts) {
+  const res = await fetch(path, opts);
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(body.error || ("request failed: " + res.status));
+  }
+  return body;
+}
+
+function pillClass(ch) {
+  if (ch.pulsing) return "pulsing";
+  if (ch.on === true) return "on";
+  if (ch.on === false) return "off";
+  return "";
+}
+
+function pillText(ch) {
+  if (ch.pulsing) return `PULSING ${ch.pulse_seconds_left ?? ""}s`;
+  if (ch.on === true) return "ON";
+  if (ch.on === false) return "OFF";
+  return "UNKNOWN";
+}
+
+function renderChannels(snapshot) {
+  const container = document.getElementById("channels");
+  snapshot.channels.forEach(ch => {
+    let card = document.getElementById("card-" + ch.index);
+    if (!card) {
+      card = document.createElement("div");
+      card.className = "card";
+      card.id = "card-" + ch.index;
+      card.innerHTML = `
+        <div class="card-head">
+          <input class="name" data-index="${ch.index}" spellcheck="false">
+          <span class="state-pill" data-role="pill"></span>
+        </div>
+        <div class="btn-row">
+          <button class="on-btn" data-action="on">On</button>
+          <button class="off-btn" data-action="off">Off</button>
+          <button data-action="toggle">Toggle</button>
+        </div>
+        <div class="pulse-row">
+          <input type="number" min="0.1" max="3600" step="0.1" data-role="pulse-duration">
+          <button class="primary" data-action="pulse">Pulse</button>
+        </div>
+      `;
+      container.appendChild(card);
+
+      const nameInput = card.querySelector(".name");
+      nameInput.addEventListener("focus", () => renaming.add(ch.index));
+      nameInput.addEventListener("blur", async () => {
+        renaming.delete(ch.index);
+        const value = nameInput.value.trim();
+        if (value) {
+          try { await api(`/api/channel/${ch.index}/rename`, {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({name: value})
+          }); } catch (e) { showError(e.message); }
+        }
+      });
+      nameInput.addEventListener("keydown", e => {
+        if (e.key === "Enter") nameInput.blur();
+      });
+
+      card.querySelector('[data-action="on"]').addEventListener("click", () => runAction(ch.index, "on"));
+      card.querySelector('[data-action="off"]').addEventListener("click", () => runAction(ch.index, "off"));
+      card.querySelector('[data-action="toggle"]').addEventListener("click", () => runAction(ch.index, "toggle"));
+      card.querySelector('[data-action="pulse"]').addEventListener("click", () => {
+        const durationInput = card.querySelector('[data-role="pulse-duration"]');
+        const duration = parseFloat(durationInput.value) || snapshot.default_pulse_seconds || 1;
+        runAction(ch.index, "pulse", {duration});
+      });
+
+      const durationInput = card.querySelector('[data-role="pulse-duration"]');
+      durationInput.value = snapshot.default_pulse_seconds ?? 1;
+    }
+
+    if (!renaming.has(ch.index) && document.activeElement !== card.querySelector(".name")) {
+      card.querySelector(".name").value = ch.name;
+    }
+    const pill = card.querySelector('[data-role="pill"]');
+    pill.textContent = pillText(ch);
+    pill.className = "state-pill " + pillClass(ch);
+  });
+}
+
+async function runAction(index, action, body) {
+  try {
+    const snapshot = await api(`/api/channel/${index}/${action}`, {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(body || {})
+    });
+    render(snapshot);
+  } catch (e) {
+    showError(e.message);
+  }
+}
+
+function showError(message) {
+  const banner = document.getElementById("error-banner");
+  banner.textContent = message;
+  banner.classList.add("show");
+}
+
+function clearError() {
+  document.getElementById("error-banner").classList.remove("show");
+}
+
+function render(snapshot) {
+  const dot = document.getElementById("conn-dot");
+  const text = document.getElementById("conn-text");
+  if (snapshot.connected) {
+    dot.className = "dot ok";
+    text.textContent = "connected";
+    clearError();
+  } else {
+    dot.className = "dot bad";
+    text.textContent = "disconnected";
+    if (snapshot.error) showError(snapshot.error);
+  }
+  document.getElementById("voltage").textContent =
+    (snapshot.voltage != null) ? `${snapshot.voltage.toFixed(2)} V` : "";
+
+  const ipInput = document.getElementById("device-ip");
+  if (document.activeElement !== ipInput) {
+    ipInput.value = snapshot.device_ip;
+  }
+
+  renderChannels(snapshot);
+}
+
+async function poll() {
+  try {
+    const snapshot = await api("/api/status");
+    render(snapshot);
+  } catch (e) {
+    showError("Lost contact with the control panel server itself: " + e.message);
+  } finally {
+    setTimeout(poll, POLL_MS);
+  }
+}
+
+document.getElementById("all-on").addEventListener("click", async () => {
+  try { render(await api("/api/all_on", {method: "POST"})); } catch (e) { showError(e.message); }
+});
+document.getElementById("all-off").addEventListener("click", async () => {
+  try { render(await api("/api/all_off", {method: "POST"})); } catch (e) { showError(e.message); }
+});
+document.getElementById("save-ip").addEventListener("click", async () => {
+  const ip = document.getElementById("device-ip").value.trim();
+  if (!ip) return;
+  try { render(await api("/api/device_address", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({ip})
+  })); } catch (e) { showError(e.message); }
+});
+
+poll();
+</script>
+</body>
+</html>
