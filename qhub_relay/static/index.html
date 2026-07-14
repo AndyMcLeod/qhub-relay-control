@@ -349,9 +349,10 @@
 <main>
   <div class="error-banner" id="error-banner"></div>
   <div class="sync-banner" id="sync-banner">
-    Channel state isn't known yet (the device can't reliably report it). Press
-    <strong>All On</strong> or <strong>All Off</strong> once to synchronize --
-    per-channel On/Off/Pulse unlock after that.
+    Channel state isn't known yet (the device can't reliably report it).
+    Synchronizing automatically with <strong>All Off</strong> -- no action
+    needed. Per-channel On/Off/Pulse unlock once that lands, or press
+    <strong>All On</strong> yourself if you'd rather start there.
   </div>
 
   <div class="global-actions">
@@ -520,7 +521,7 @@ function renderChannels(snapshot) {
     const onBtn = card.querySelector('[data-action="on"]');
     const offBtn = card.querySelector('[data-action="off"]');
     const pulseBtn = card.querySelector('[data-action="pulse"]');
-    const hint = "state not known yet -- press All On or All Off to synchronize";
+    const hint = "state not known yet -- synchronizing automatically with All Off";
     onBtn.disabled = unknown;
     offBtn.disabled = unknown;
     pulseBtn.disabled = unknown;

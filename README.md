@@ -15,10 +15,15 @@ dependencies, one program.
 - **All On** / **All Off**
 - On/Off/Pulse track real relay state in software rather than trusting the
   device's own status field (which doesn't reflect it -- see the caveat
-  below). Press **All On** or **All Off** once after starting the program to
-  synchronize; per-channel On/Off/Pulse are disabled with a banner explaining
-  why until then. **Toggle** always works, since it doesn't need to know the
-  starting state.
+  below). On startup, or after pointing the tool at a different device, it
+  doesn't wait for you: it sends **All Off** on its own as soon as it can
+  reach the device, always the fail-safe direction, never All On. Per-channel
+  On/Off/Pulse stay disabled with a banner until that lands (or until you
+  press All On yourself, which cancels the automatic All Off and counts as
+  your own synchronization instead). If the device isn't reachable yet, it
+  just keeps trying every couple of seconds -- no page refresh or button
+  press needed once the link comes up. **Toggle** always works, since it
+  doesn't need to know the starting state.
 - Editable channel names (placeholders `Channel 1`..`Channel 6` until you
   rename them for your install), saved to `config.json` immediately on edit
   and reloaded on every start -- survives power cycles and separate missions
@@ -48,12 +53,17 @@ dependencies, one program.
    browser opens the control panel automatically at `http://127.0.0.1:8420/`.
 3. If your Q-Hub isn't at the default address (`192.168.1.210`), type the
    correct IP into the **Device** field at the top and click **Set**.
-4. Press **All On** or **All Off** once to synchronize (per-channel controls
-   stay disabled until you do -- see Features above).
+4. Wait a couple of seconds for it to synchronize on its own (it sends All
+   Off automatically -- see Features above), or press **All On** yourself if
+   you'd rather start there. Per-channel controls stay disabled until one of
+   those lands.
 5. Leave the console window running while you use the panel; closing it stops
    the local server. Every action is a fresh, short connection to the device,
    so it's safe to leave running for long periods — a network blip just means
-   the status panel shows "disconnected" until the link comes back.
+   the status panel shows "disconnected" until the link comes back, and it
+   keeps checking in the background the whole time. No refresh needed: once
+   the device answers again, the panel and the log both pick it up on their
+   own within a couple of seconds.
 
 Channel names and the device address are saved to `config.json`, created next
 to the program the first time it runs.
@@ -131,7 +141,10 @@ meant the Off button silently did nothing: it always read the channel as
 already off and skipped sending the toggle, even when the relay was actually
 on. On/Off/Pulse now track commanded state in software instead (see Features
 above), seeded only by All On / All Off, which are the only two commands
-confirmed to set state unconditionally rather than merely flip it.
+confirmed to set state unconditionally rather than merely flip it. The
+program seeds that state itself, automatically, with All Off as soon as it
+can reach the device -- it does not wait for a button press, and it never
+defaults to All On on its own.
 
 **Caveat 2:** `MR1#1,ip` returned `255.255.255.255` with DHCP off on the unit
 this was tested against, rather than its real operating address -- and OTAQ's

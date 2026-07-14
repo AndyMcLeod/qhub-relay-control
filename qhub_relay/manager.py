@@ -10,7 +10,10 @@ does not track real relay position (see device.py's module docstring).
 Toggle, All On, and All Off are all confirmed reliable (each verified by a
 measurable supply-voltage change), so this class treats its own record of
 "what did we last command" as ground truth, seeded to a known state only by
-All On / All Off, and left unknown (not guessed) until one of those runs."""
+All On / All Off. Whenever that record is fully unknown (fresh start, or a
+different device just pointed at), the poller fires All Off on its own --
+the fail-safe direction, never All On -- so the operator is never stuck
+waiting on a banner; see _maybe_auto_sync."""
 
 import threading
 import time
@@ -22,8 +25,8 @@ PULSE_OFF_RETRY_DELAYS = (1.0, 2.0, 4.0)
 HEARTBEAT_INTERVAL_SECONDS = 60.0
 
 UNKNOWN_STATE_MESSAGE = (
-    "channel {index} state is not yet known -- press All On or All Off "
-    "to establish a synchronized starting point"
+    "channel {index} state is not yet known -- synchronizing automatically "
+    "with All Off, try again in a moment, or press All On yourself"
 )
 
 
@@ -66,6 +69,7 @@ class Manager:
             self._record_success(status)
             self._log_connection_change(True, "")
             self._maybe_heartbeat(status)
+            self._maybe_auto_sync()
         except QHubError as exc:
             self._record_error(exc)
             self._log_connection_change(False, str(exc))
@@ -114,6 +118,31 @@ class Manager:
             return
         states = ",".join("?" if c is None else ("on" if c else "off") for c in commanded)
         self.logbook.status("heartbeat", f"voltage={status.get('voltage')} channels={states}")
+
+    def _maybe_auto_sync(self):
+        """Called after every successful poll. If channel state is still fully
+        unknown (fresh start, or just pointed at a different device), send All
+        Off on our own, no button click required, so the operator is never
+        stuck staring at a banner. Off, not On: this fires without being asked,
+        so it only ever moves things to the fail-safe direction. If it fails
+        (device busy, brief drop) it simply tries again on the next poll,
+        since the trigger condition -- state still fully unknown -- still
+        holds; a manual All On click in the meantime marks state as known and
+        this stops firing on its own."""
+        with self._state_lock:
+            all_unknown = all(c is None for c in self._commanded)
+        if not all_unknown:
+            return
+        try:
+            status = self.client.all_off()
+        except QHubError as exc:
+            self._record_error(exc)
+            self._log_command(None, "auto_all_off", f"failed, will retry: {exc}")
+            return
+        self._record_success(status)
+        with self._state_lock:
+            self._commanded = [False] * NUM_CHANNELS
+        self._log_command(None, "auto_all_off", "ok (automatic, no user action)")
 
     # -- commanded-state tracking ---------------------------------------------
 
