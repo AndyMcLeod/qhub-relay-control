@@ -281,6 +281,54 @@
   .network-set button {
     align-self: flex-start;
   }
+  .log-download {
+    color: var(--accent);
+    font-size: 0.85rem;
+    text-decoration: none;
+  }
+  .log-download:hover {
+    text-decoration: underline;
+  }
+  #log-date-select {
+    background: #0d1318;
+    border: 1px solid var(--panel-border);
+    color: var(--text);
+    border-radius: 6px;
+    padding: 6px 8px;
+    font-size: 0.85rem;
+  }
+  .log-table-wrap {
+    max-height: 320px;
+    overflow-y: auto;
+    border: 1px solid var(--panel-border);
+    border-radius: 8px;
+  }
+  .log-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.78rem;
+    font-variant-numeric: tabular-nums;
+  }
+  .log-table th, .log-table td {
+    text-align: left;
+    padding: 5px 8px;
+    border-bottom: 1px solid var(--panel-border);
+    white-space: nowrap;
+  }
+  .log-table td:last-child {
+    white-space: normal;
+    max-width: 320px;
+  }
+  .log-table th {
+    position: sticky;
+    top: 0;
+    background: #1f2b35;
+    color: var(--text-dim);
+    font-weight: 600;
+  }
+  .log-table tr:last-child td {
+    border-bottom: none;
+  }
 </style>
 </head>
 <body>
@@ -346,6 +394,30 @@
           I understand this may make the device unreachable and I've verified the address.
         </label>
         <button class="off-btn" id="apply-network" disabled>Apply new network config</button>
+      </div>
+    </div>
+  </details>
+
+  <details class="network-panel" id="log-panel">
+    <summary>Mission log</summary>
+    <div class="network-body">
+      <p class="network-note">
+        Every command and every connection change, timestamped with this
+        computer's local clock. One file per day, in the <code>logs</code>
+        folder next to the program &mdash; opens directly in a spreadsheet.
+      </p>
+      <div class="network-row">
+        <button id="refresh-log">Refresh</button>
+        <select id="log-date-select"></select>
+        <a id="log-download-link" class="log-download" href="#">Download CSV</a>
+      </div>
+      <div class="log-table-wrap">
+        <table class="log-table">
+          <thead>
+            <tr><th>Time</th><th>Type</th><th>Channel</th><th>Event</th><th>Detail</th></tr>
+          </thead>
+          <tbody id="log-tbody"></tbody>
+        </table>
       </div>
     </div>
   </details>
@@ -606,6 +678,57 @@ document.getElementById("apply-network").addEventListener("click", async () => {
   } finally {
     btn.disabled = true;
   }
+});
+
+// -- mission log -------------------------------------------------------
+
+async function loadLog() {
+  try {
+    const data = await api("/api/log");
+    const select = document.getElementById("log-date-select");
+    const prevValue = select.value;
+    select.innerHTML = "";
+    data.dates.forEach(d => {
+      const opt = document.createElement("option");
+      opt.value = d;
+      opt.textContent = d;
+      select.appendChild(opt);
+    });
+    if (data.dates.length) {
+      select.value = data.dates.includes(prevValue) ? prevValue : data.dates[data.dates.length - 1];
+    }
+    updateLogDownloadLink();
+
+    const tbody = document.getElementById("log-tbody");
+    tbody.innerHTML = "";
+    data.recent.forEach(row => {
+      const tr = document.createElement("tr");
+      row.forEach(cell => {
+        const td = document.createElement("td");
+        td.textContent = cell;
+        tr.appendChild(td);
+      });
+      tbody.appendChild(tr);
+    });
+    const wrap = tbody.closest(".log-table-wrap");
+    wrap.scrollTop = wrap.scrollHeight;
+  } catch (e) {
+    showError("Could not load log: " + e.message);
+  }
+}
+
+function updateLogDownloadLink() {
+  const select = document.getElementById("log-date-select");
+  const link = document.getElementById("log-download-link");
+  link.href = select.value
+    ? `/api/log/download?date=${encodeURIComponent(select.value)}`
+    : "/api/log/download";
+}
+
+document.getElementById("refresh-log").addEventListener("click", loadLog);
+document.getElementById("log-date-select").addEventListener("change", updateLogDownloadLink);
+document.getElementById("log-panel").addEventListener("toggle", e => {
+  if (e.target.open) loadLog();
 });
 
 poll();

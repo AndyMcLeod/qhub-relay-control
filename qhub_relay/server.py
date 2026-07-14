@@ -8,12 +8,14 @@ import re
 import socketserver
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import urlparse, parse_qs
 
 from .device import QHubError, NUM_CHANNELS
 
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 
 _CHANNEL_ACTION_RE = re.compile(r"^/api/channel/(\d+)/(on|off|toggle|pulse|rename)$")
+_LOG_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
 def make_handler(manager):
@@ -58,14 +60,20 @@ def make_handler(manager):
         # -- routing ------------------------------------------------------
 
         def do_GET(self):
-            if self.path == "/" or self.path == "/index.html":
+            parsed = urlparse(self.path)
+            path = parsed.path
+            if path == "/" or path == "/index.html":
                 return self._serve_static("index.html", "text/html")
-            if self.path == "/api/status":
+            if path == "/api/status":
                 return self._send_json(manager.snapshot())
-            if self.path == "/api/network":
+            if path == "/api/network":
                 return self._run_action(manager.query_ip)
-            if self.path == "/api/discover":
+            if path == "/api/discover":
                 return self._run_action(lambda: {"found": manager.find_devices()})
+            if path == "/api/log":
+                return self._handle_log_summary()
+            if path == "/api/log/download":
+                return self._handle_log_download(parse_qs(parsed.query))
             self.send_error(404)
 
         def do_POST(self):
@@ -143,6 +151,38 @@ def make_handler(manager):
             if not ip:
                 return self._send_error_json("ip must not be empty", 400)
             return self._run_action(manager.set_ip, ip, dhcp)
+
+        def _handle_log_summary(self):
+            logbook = manager.logbook
+            if logbook is None:
+                return self._send_json({"dates": [], "recent": []})
+            return self._send_json({
+                "dates": logbook.list_dates(),
+                "recent": logbook.tail(200),
+            })
+
+        def _handle_log_download(self, query):
+            logbook = manager.logbook
+            if logbook is None:
+                return self.send_error(404)
+            dates = query.get("date")
+            date = dates[0] if dates else None
+            if date is None:
+                path = logbook.today_path()
+            elif _LOG_DATE_RE.match(date):
+                path = logbook.path_for_date(date)
+            else:
+                return self._send_error_json("invalid date", 400)
+            if path is None or not os.path.exists(path):
+                return self.send_error(404)
+            with open(path, "rb") as f:
+                body = f.read()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/csv; charset=utf-8")
+            self.send_header("Content-Disposition", f'attachment; filename="{os.path.basename(path)}"')
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
 
         def _serve_static(self, filename, content_type):
             path = os.path.join(STATIC_DIR, filename)

@@ -5,3 +5,4 @@ build/
 dist/
 *.spec.bak
 config.json
+logs/

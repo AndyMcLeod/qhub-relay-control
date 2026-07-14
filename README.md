@@ -20,7 +20,9 @@ dependencies, one program.
   why until then. **Toggle** always works, since it doesn't need to know the
   starting state.
 - Editable channel names (placeholders `Channel 1`..`Channel 6` until you
-  rename them for your install) that persist between runs
+  rename them for your install), saved to `config.json` immediately on edit
+  and reloaded on every start -- survives power cycles and separate missions
+  the same way
 - Live status panel (voltage, per-channel state) in any browser, polling the
   device in the background
 - Built to survive a flaky, long-lived link: every device command is a short,
@@ -30,6 +32,14 @@ dependencies, one program.
   on the local network segment, a device network-config query, and a
   static-IP/DHCP write -- see the warning under [The protocol](#the-protocol)
   before using the last one
+- **Mission log**: every command and every connection change, timestamped
+  with this computer's local clock (the device has no clock of its own), one
+  CSV file per day in `logs/`. Viewable and downloadable from the panel --
+  see [The mission log](#the-mission-log) below
+- Refuses to run a second copy alongside a first: launching it again while
+  one is already open just brings up your browser to the running instance,
+  instead of silently starting a second server that fights the first one
+  over which copy's changes actually stick
 
 ## Quick start
 
@@ -66,6 +76,20 @@ python -m venv .venv-build
 ```
 
 The result is `dist/QHubRelayControl.exe`.
+
+## The mission log
+
+Every command (on/off/toggle/pulse/all-on/all-off/rename/network changes) and
+every connection-state change (connected, disconnected, a periodic
+one-per-minute heartbeat with voltage and channel states) is appended to
+`logs/qhub-log-<YYYY-MM-DD>.csv`, one file per local calendar day. Timestamps
+are this computer's local wall-clock time -- the Q-Hub's wire protocol
+carries no clock or timestamp of its own, so there's nothing else to log
+against. The **Mission log** panel in the control page shows the current
+day's recent activity and lets you download any day's CSV; it also opens
+directly in Excel/Sheets/Numbers if you'd rather work from the file on disk.
+Columns: `timestamp, type, channel_index, channel_name, event, detail`, where
+`type` is `command` or `status`.
 
 ## The protocol
 
