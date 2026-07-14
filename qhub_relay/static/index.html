@@ -87,6 +87,17 @@
     font-size: 0.9rem;
   }
   .error-banner.show { display: block; }
+  .sync-banner {
+    display: none;
+    background: #3a3320;
+    border: 1px solid var(--warn);
+    color: #f0d78c;
+    padding: 10px 14px;
+    border-radius: 8px;
+    margin-bottom: 16px;
+    font-size: 0.9rem;
+  }
+  .sync-banner.show { display: block; }
   .global-actions {
     display: flex;
     gap: 12px;
@@ -289,6 +300,11 @@
 
 <main>
   <div class="error-banner" id="error-banner"></div>
+  <div class="sync-banner" id="sync-banner">
+    Channel state isn't known yet (the device can't reliably report it). Press
+    <strong>All On</strong> or <strong>All Off</strong> once to synchronize --
+    per-channel On/Off/Pulse unlock after that.
+  </div>
 
   <div class="global-actions">
     <button class="primary" id="all-on">All On</button>
@@ -427,6 +443,18 @@ function renderChannels(snapshot) {
     const pill = card.querySelector('[data-role="pill"]');
     pill.textContent = pillText(ch);
     pill.className = "state-pill " + pillClass(ch);
+
+    const unknown = ch.on === null;
+    const onBtn = card.querySelector('[data-action="on"]');
+    const offBtn = card.querySelector('[data-action="off"]');
+    const pulseBtn = card.querySelector('[data-action="pulse"]');
+    const hint = "state not known yet -- press All On or All Off to synchronize";
+    onBtn.disabled = unknown;
+    offBtn.disabled = unknown;
+    pulseBtn.disabled = unknown;
+    onBtn.title = unknown ? hint : "";
+    offBtn.title = unknown ? hint : "";
+    pulseBtn.title = unknown ? hint : "";
   });
 }
 
@@ -472,6 +500,9 @@ function render(snapshot) {
   if (document.activeElement !== ipInput) {
     ipInput.value = snapshot.device_ip;
   }
+
+  const anyUnknown = snapshot.channels.some(ch => ch.on === null);
+  document.getElementById("sync-banner").classList.toggle("show", anyUnknown);
 
   renderChannels(snapshot);
 }

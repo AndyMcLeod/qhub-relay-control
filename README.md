@@ -13,6 +13,12 @@ dependencies, one program.
 - Per-channel **On**, **Off**, **Toggle**, and a configurable-duration
   **momentary Pulse**
 - **All On** / **All Off**
+- On/Off/Pulse track real relay state in software rather than trusting the
+  device's own status field (which doesn't reflect it -- see the caveat
+  below). Press **All On** or **All Off** once after starting the program to
+  synchronize; per-channel On/Off/Pulse are disabled with a banner explaining
+  why until then. **Toggle** always works, since it doesn't need to know the
+  starting state.
 - Editable channel names (placeholders `Channel 1`..`Channel 6` until you
   rename them for your install) that persist between runs
 - Live status panel (voltage, per-channel state) in any browser, polling the
@@ -32,7 +38,9 @@ dependencies, one program.
    browser opens the control panel automatically at `http://127.0.0.1:8420/`.
 3. If your Q-Hub isn't at the default address (`192.168.1.210`), type the
    correct IP into the **Device** field at the top and click **Set**.
-4. Leave the console window running while you use the panel; closing it stops
+4. Press **All On** or **All Off** once to synchronize (per-channel controls
+   stay disabled until you do -- see Features above).
+5. Leave the console window running while you use the panel; closing it stops
    the local server. Every action is a fresh, short connection to the device,
    so it's safe to leave running for long periods — a network blip just means
    the status panel shows "disconnected" until the link comes back.
@@ -85,14 +93,21 @@ this or building their own client:
   loops broadcast packets back to the sending socket, and the vendor app does
   the same filtering for the same reason.
 
-**Caveat 1:** field 1-6 state is derived from downstream current draw, not raw
-relay contact position. With no load on a channel (e.g. bench testing with
-nothing plugged in) it reads as "off" regardless of the relay's actual
-position — this matches the vendor's own app, not a bug here. Once real loads
-are wired up on the vehicle, readback should track actual state. Because of
-this, on/off/pulse are implemented as read-current-state-then-toggle-if-needed
-on top of the device's native toggle-only relay command, exactly like the
-vendor app does.
+**Caveat 1:** field 1-6 does not reliably reflect relay contact position, full
+stop. It was first suspected from current-draw reasoning on an unloaded bench
+unit; it's now confirmed directly. Toggling a channel and independently
+verifying the relay actually energized (a measurable supply-voltage sag,
+reproducibly reversed by a second toggle) still leaves this field at 0. This
+matches the vendor's own app, so it's a device/firmware property, not a bug
+here -- but it rules the field out as ground truth, loaded or not.
+
+An earlier version of this tool used read-current-state-then-toggle-if-needed
+against that field, the same pattern the vendor app uses. In practice that
+meant the Off button silently did nothing: it always read the channel as
+already off and skipped sending the toggle, even when the relay was actually
+on. On/Off/Pulse now track commanded state in software instead (see Features
+above), seeded only by All On / All Off, which are the only two commands
+confirmed to set state unconditionally rather than merely flip it.
 
 **Caveat 2:** `MR1#1,ip` returned `255.255.255.255` with DHCP off on the unit
 this was tested against, rather than its real operating address -- and OTAQ's

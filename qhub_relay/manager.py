@@ -2,7 +2,15 @@
 poller, and pulse (momentary on) scheduling. This is the object the HTTP
 layer talks to; it never lets a slow/dead network link block the whole
 program -- every device transaction is time-bounded (see device.py) and
-the poller just records the latest error and keeps retrying."""
+the poller just records the latest error and keeps retrying.
+
+On/off state is tracked here, in software, rather than read back from the
+device: bench testing confirmed the device's own per-channel status field
+does not track real relay position (see device.py's module docstring).
+Toggle, All On, and All Off are all confirmed reliable (each verified by a
+measurable supply-voltage change), so this class treats its own record of
+"what did we last command" as ground truth, seeded to a known state only by
+All On / All Off, and left unknown (not guessed) until one of those runs."""
 
 import threading
 import time
@@ -11,6 +19,11 @@ from .device import QHubClient, QHubError, NUM_CHANNELS, discover as discover_de
 
 POLL_INTERVAL_SECONDS = 2.0
 PULSE_OFF_RETRY_DELAYS = (1.0, 2.0, 4.0)
+
+UNKNOWN_STATE_MESSAGE = (
+    "channel {index} state is not yet known -- press All On or All Off "
+    "to establish a synchronized starting point"
+)
 
 
 class Manager:
@@ -23,6 +36,7 @@ class Manager:
         self._last_ok_time = None
         self._last_error = None
         self._pulsing = {}  # channel_index -> ends_at (epoch seconds)
+        self._commanded = [None] * NUM_CHANNELS  # tri-state: None/True/False
 
         self._poll_stop = threading.Event()
         self._poll_thread = threading.Thread(target=self._poll_loop, daemon=True)
@@ -57,6 +71,23 @@ class Manager:
         with self._state_lock:
             self._last_error = str(exc)
 
+    # -- commanded-state tracking ---------------------------------------------
+
+    def _ensure_state(self, index, desired_on):
+        """Bring channel `index` to `desired_on`, using our own record of what
+        we last commanded (never the device's status field). Raises ValueError
+        if we don't yet have a known starting point for this channel."""
+        with self._state_lock:
+            current = self._commanded[index]
+        if current is None:
+            raise ValueError(UNKNOWN_STATE_MESSAGE.format(index=index))
+        if current == desired_on:
+            return
+        status = self.client.toggle(index)
+        self._record_success(status)
+        with self._state_lock:
+            self._commanded[index] = desired_on
+
     # -- snapshot for the UI --------------------------------------------------
 
     def snapshot(self):
@@ -65,7 +96,7 @@ class Manager:
             now = time.time()
             channels = []
             for i in range(NUM_CHANNELS):
-                on = self._last_status["channels"][i] if self._last_status else None
+                on = self._commanded[i]
                 ends_at = self._pulsing.get(i)
                 channels.append({
                     "index": i,
@@ -90,21 +121,27 @@ class Manager:
     def do_toggle(self, index):
         status = self.client.toggle(index)
         self._record_success(status)
+        with self._state_lock:
+            current = self._commanded[index]
+            self._commanded[index] = (not current) if current is not None else None
         return self.snapshot()
 
     def do_set(self, index, on):
-        status = self.client.set_channel(index, on)
-        self._record_success(status)
+        self._ensure_state(index, on)
         return self.snapshot()
 
     def do_all_on(self):
         status = self.client.all_on()
         self._record_success(status)
+        with self._state_lock:
+            self._commanded = [True] * NUM_CHANNELS
         return self.snapshot()
 
     def do_all_off(self):
         status = self.client.all_off()
         self._record_success(status)
+        with self._state_lock:
+            self._commanded = [False] * NUM_CHANNELS
         return self.snapshot()
 
     def do_pulse(self, index, duration):
@@ -112,10 +149,9 @@ class Manager:
             if index in self._pulsing:
                 raise QHubError(f"channel {index} is already pulsing")
 
-        # Turn on synchronously so the caller gets an immediate error if the
-        # device is unreachable, rather than a pulse silently never starting.
-        status = self.client.set_channel(index, True)
-        self._record_success(status)
+        # Turn on synchronously so the caller gets an immediate error (including
+        # "state not known yet") rather than a pulse silently never starting.
+        self._ensure_state(index, True)
 
         with self._state_lock:
             self._pulsing[index] = time.time() + duration
@@ -133,11 +169,10 @@ class Manager:
             if delay:
                 time.sleep(delay)
             try:
-                status = self.client.set_channel(index, False)
-                self._record_success(status)
+                self._ensure_state(index, False)
                 last_exc = None
                 break
-            except QHubError as exc:
+            except (QHubError, ValueError) as exc:
                 last_exc = exc
                 self._record_error(exc)
         with self._state_lock:
@@ -162,6 +197,7 @@ class Manager:
         with self._state_lock:
             self._last_status = None
             self._last_error = None
+            self._commanded = [None] * NUM_CHANNELS  # a different device: state is unknown again
 
     # -- network diagnostics (advanced, use with care) ------------------------
 

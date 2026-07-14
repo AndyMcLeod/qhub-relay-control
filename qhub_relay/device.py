@@ -23,11 +23,18 @@ Commands used:
     MR1#1,setip,<...>    -> write a new network config (see set_ip below)
 
 Response fields (comma-split, 0-indexed after the "MR1#1" prefix):
-    [1..6]  per-channel state, reported from downstream current draw --
-            with no load attached (e.g. bench testing) these read 0
-            regardless of relay position. This matches the vendor app's
-            own behaviour; it is a hardware/telemetry property, not a
-            bug in this client.
+    [1..6]  per-channel state. Confirmed unreliable on the unit this was
+            tested against: toggling a channel and confirming the relay
+            actually energized (via a measurable supply-voltage sag,
+            and reproducibly reversing it with a second toggle) still
+            leaves this field at 0 throughout. It matches the vendor
+            app's own behaviour, so it is a device/firmware property,
+            not a bug in this client -- but it means neither this client
+            nor QHub.exe can use it as ground truth for on/off state.
+            QHubClient still decodes it (decode_status below) for anyone
+            who wants the raw value, but callers that need to know
+            whether a channel is actually on should track their own
+            commanded state instead; see Manager in manager.py.
     [14]    supply voltage in millivolts
 
 Discovery: the device also answers a UDP broadcast on port 50501 -- the
@@ -187,14 +194,6 @@ class QHubClient:
 
     def all_off(self):
         return decode_status(self._transact("MR1#1,alloff"))
-
-    def set_channel(self, channel_index: int, desired_on: bool):
-        """Explicit on/off on top of the device's native toggle-only relay command:
-        read current state, toggle only if it doesn't already match."""
-        status = self.query_all()
-        if status["channels"][channel_index] != desired_on:
-            status = self.toggle(channel_index)
-        return status
 
     def query_ip(self):
         """Read back the device's stored network config. See the caveat in this
