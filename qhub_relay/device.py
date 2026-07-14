@@ -19,6 +19,8 @@ Commands used:
     MR1#1,relay,<0-5>    -> toggle channel (0-based index)
     MR1#1,allon          -> force all channels on
     MR1#1,alloff         -> force all channels off
+    MR1#1,ip             -> query the device's stored network config
+    MR1#1,setip,<...>    -> write a new network config (see set_ip below)
 
 Response fields (comma-split, 0-indexed after the "MR1#1" prefix):
     [1..6]  per-channel state, reported from downstream current draw --
@@ -27,15 +29,35 @@ Response fields (comma-split, 0-indexed after the "MR1#1" prefix):
             own behaviour; it is a hardware/telemetry property, not a
             bug in this client.
     [14]    supply voltage in millivolts
+
+Discovery: the device also answers a UDP broadcast on port 50501 -- the
+same $<command>*<checksum>\r\n framing, command "?", sent to
+255.255.255.255:50501, gets a "$MR1#1*<checksum>\r\n" reply from each
+Q-Hub on the local segment. Useful when the device's address isn't known
+(e.g. after it's been reconfigured, or on an unfamiliar boat network).
+
+Caveat on MR1#1,ip / MR1#1,setip: querying a real unit on the bench
+returned "255.255.255.255" with DHCP off, and OTAQ's own QHub.exe showed
+the identical value in its "Set IP" dialog -- so this is a genuine
+firmware/protocol quirk, not a bug in this client, and this field should
+not be trusted as the device's real operating address. set_ip() is
+implemented faithfully against the decompiled protocol (verified byte-for-
+byte against QHub.exe) but was deliberately NOT exercised against real
+hardware here, since a wrong write could leave the device unreachable
+without physical/serial access once it's mounted on a vehicle. Treat it
+as an advanced, use-at-your-own-risk feature.
 """
 
 import socket
 import threading
+import time
 
 DEFAULT_PORT = 23
+DISCOVERY_PORT = 50501
 NUM_CHANNELS = 6
 CONNECT_TIMEOUT = 3.0
 READ_TIMEOUT = 3.0
+DISCOVERY_TIMEOUT = 4.0
 RECV_BUFSIZE = 1024
 
 
@@ -96,6 +118,17 @@ def decode_status(fields):
         except ValueError:
             voltage = None
     return {"channels": channels, "voltage": voltage}
+
+
+def decode_ip_info(fields):
+    if len(fields) < 6:
+        raise ProtocolError(f"ip response too short: {fields!r}")
+    try:
+        octets = tuple(int(fields[i]) for i in range(1, 5))
+        dhcp = fields[5] != "0"
+    except ValueError:
+        raise ProtocolError(f"non-numeric ip fields: {fields!r}")
+    return {"ip": ".".join(str(o) for o in octets), "dhcp": dhcp}
 
 
 class QHubClient:
@@ -162,3 +195,70 @@ class QHubClient:
         if status["channels"][channel_index] != desired_on:
             status = self.toggle(channel_index)
         return status
+
+    def query_ip(self):
+        """Read back the device's stored network config. See the caveat in this
+        module's docstring: on the unit this was verified against, this reads as
+        255.255.255.255 regardless of the device's real operating address --
+        OTAQ's own app shows the same thing, so don't treat this as ground truth."""
+        return decode_ip_info(self._transact("MR1#1,ip"))
+
+    def set_ip(self, ip: str, dhcp: bool):
+        """Write a new network config. Mirrors QHub.exe's "Set IP" dialog exactly
+        (verified against the decompiled protocol, not against real hardware --
+        see the module docstring). A wrong IP/mask here can make the device
+        unreachable until it's re-addressed via physical/serial access, so this
+        is intentionally not wired into routine use -- callers should get
+        explicit user confirmation first."""
+        octets = ip.split(".")
+        if len(octets) != 4 or not all(o.isdigit() and 0 <= int(o) <= 255 for o in octets):
+            raise ValueError(f"not a valid IPv4 address: {ip!r}")
+        suffix = 128 if dhcp else 0
+        command = f"MR1#1,setip,{'.'.join(octets)}.{suffix}"
+        self._transact(command)
+        # The device doesn't send a status reply to this command (fire-and-forget
+        # in the vendor app too), so there is nothing here to validate/decode.
+
+
+def discover(timeout=DISCOVERY_TIMEOUT, udp_port=DISCOVERY_PORT):
+    """Broadcast a UDP query for any Q-Hub on the local network segment and
+    return the IP addresses that answered. Safe/read-only. Filters out this
+    machine's own addresses, since Windows loops broadcast packets back to
+    the sending socket (the vendor app does the same filtering, for the same
+    reason)."""
+    local_ips = set()
+    try:
+        hostname = socket.gethostname()
+        for info in socket.getaddrinfo(hostname, None, socket.AF_INET):
+            local_ips.add(info[4][0])
+    except OSError:
+        pass
+    local_ips.add("127.0.0.1")
+
+    found = []
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.bind(("0.0.0.0", udp_port))
+        sock.settimeout(0.5)
+        sock.sendto(frame("?"), ("255.255.255.255", udp_port))
+
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            try:
+                data, (addr, _port) = sock.recvfrom(512)
+            except socket.timeout:
+                continue
+            except OSError:
+                break
+            if addr in local_ips or addr in found:
+                continue
+            try:
+                parse_response(data.decode("ascii", errors="replace"))
+            except ProtocolError:
+                continue
+            found.append(addr)
+    finally:
+        sock.close()
+    return found

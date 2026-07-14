@@ -7,7 +7,7 @@ the poller just records the latest error and keeps retrying."""
 import threading
 import time
 
-from .device import QHubClient, QHubError, NUM_CHANNELS
+from .device import QHubClient, QHubError, NUM_CHANNELS, discover as discover_devices
 
 POLL_INTERVAL_SECONDS = 2.0
 PULSE_OFF_RETRY_DELAYS = (1.0, 2.0, 4.0)
@@ -162,3 +162,19 @@ class Manager:
         with self._state_lock:
             self._last_status = None
             self._last_error = None
+
+    # -- network diagnostics (advanced, use with care) ------------------------
+
+    def query_ip(self):
+        """See QHubClient.query_ip's caveat: this device's own reported network
+        config may not reflect its real operating address."""
+        return self.client.query_ip()
+
+    def set_ip(self, ip, dhcp):
+        """See QHubClient.set_ip's caveat: unverified against real hardware,
+        can leave the device unreachable if wrong. Callers must get explicit
+        user confirmation before calling this."""
+        self.client.set_ip(ip, dhcp)
+
+    def find_devices(self):
+        return discover_devices()

@@ -62,6 +62,10 @@ def make_handler(manager):
                 return self._serve_static("index.html", "text/html")
             if self.path == "/api/status":
                 return self._send_json(manager.snapshot())
+            if self.path == "/api/network":
+                return self._run_action(manager.query_ip)
+            if self.path == "/api/discover":
+                return self._run_action(lambda: {"found": manager.find_devices()})
             self.send_error(404)
 
         def do_POST(self):
@@ -71,6 +75,8 @@ def make_handler(manager):
                 return self._run_action(manager.do_all_off)
             if self.path == "/api/device_address":
                 return self._handle_device_address()
+            if self.path == "/api/network":
+                return self._handle_set_network()
 
             m = _CHANNEL_ACTION_RE.match(self.path)
             if m:
@@ -124,6 +130,19 @@ def make_handler(manager):
                 return self._send_error_json("invalid port", 400)
             manager.set_device_address(ip, port)
             return self._send_json(manager.snapshot())
+
+        def _handle_set_network(self):
+            body = self._read_json_body()
+            ip = str(body.get("ip", "")).strip()
+            dhcp = bool(body.get("dhcp", False))
+            if not body.get("confirm") is True:
+                return self._send_error_json(
+                    "this changes the device's network address and requires "
+                    "confirm: true -- see the warning in the control panel", 400
+                )
+            if not ip:
+                return self._send_error_json("ip must not be empty", 400)
+            return self._run_action(manager.set_ip, ip, dhcp)
 
         def _serve_static(self, filename, content_type):
             path = os.path.join(STATIC_DIR, filename)

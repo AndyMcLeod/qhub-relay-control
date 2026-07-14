@@ -20,6 +20,10 @@ dependencies, one program.
 - Built to survive a flaky, long-lived link: every device command is a short,
   independent connection with a bounded timeout, so a dropped or slow network
   degrades to a clear "disconnected" state instead of freezing the program
+- **Network settings (advanced)** panel: broadcast discovery to find a Q-Hub
+  on the local network segment, a device network-config query, and a
+  static-IP/DHCP write -- see the warning under [The protocol](#the-protocol)
+  before using the last one
 
 ## Quick start
 
@@ -70,11 +74,18 @@ this or building their own client:
   (two running sums mod 255). The device echoes the same framing in its
   replies and expects it to check out.
 - Commands: `MR1#1,all` (query), `MR1#1,relay,<0-5>` (toggle one channel,
-  0-indexed), `MR1#1,allon`, `MR1#1,alloff`.
+  0-indexed), `MR1#1,allon`, `MR1#1,alloff`, `MR1#1,ip` (query network config),
+  `MR1#1,setip,<a>.<b>.<c>.<d>.<128|0>` (write network config -- suffix `128`
+  if the vendor app's DHCP checkbox was ticked, `0` if not).
 - Status replies are comma-separated: fields 1-6 are per-channel state,
   field 14 is supply voltage in millivolts.
+- Broadcast discovery: UDP, command `?`, sent to `255.255.255.255:50501` from
+  a socket bound to local port 50501; each Q-Hub on the segment replies with
+  `$MR1#1*<checksum>\r\n`. Filter out your own machine's addresses -- Windows
+  loops broadcast packets back to the sending socket, and the vendor app does
+  the same filtering for the same reason.
 
-**Caveat:** field 1-6 state is derived from downstream current draw, not raw
+**Caveat 1:** field 1-6 state is derived from downstream current draw, not raw
 relay contact position. With no load on a channel (e.g. bench testing with
 nothing plugged in) it reads as "off" regardless of the relay's actual
 position — this matches the vendor's own app, not a bug here. Once real loads
@@ -82,6 +93,17 @@ are wired up on the vehicle, readback should track actual state. Because of
 this, on/off/pulse are implemented as read-current-state-then-toggle-if-needed
 on top of the device's native toggle-only relay command, exactly like the
 vendor app does.
+
+**Caveat 2:** `MR1#1,ip` returned `255.255.255.255` with DHCP off on the unit
+this was tested against, rather than its real operating address -- and OTAQ's
+own `QHub.exe` showed the identical value in its "Set IP" dialog, so this is a
+genuine firmware quirk, not a bug in this client. Don't treat that query as
+ground truth. `MR1#1,setip` (the **Set a new IP address** control in the
+Network settings panel) is implemented faithfully against the decompiled
+protocol but was *not* exercised against real hardware, since a wrong write
+could leave the device unreachable until it's re-addressed via physical/serial
+access -- treat it as advanced, use-at-your-own-risk functionality, same as in
+the vendor app.
 
 ## License
 

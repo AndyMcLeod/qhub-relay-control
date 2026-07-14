@@ -192,6 +192,84 @@
   .voltage {
     font-variant-numeric: tabular-nums;
   }
+  .network-panel {
+    margin-top: 24px;
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    border-radius: 12px;
+    padding: 4px 16px;
+  }
+  .network-panel summary {
+    cursor: pointer;
+    padding: 12px 0;
+    font-weight: 600;
+    color: var(--text-dim);
+  }
+  .network-body {
+    padding: 4px 0 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+  .network-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  .network-status {
+    font-size: 0.85rem;
+    color: var(--text-dim);
+  }
+  .network-status .found-ip {
+    display: inline-block;
+    background: #1b3d29;
+    color: var(--on);
+    border-radius: 6px;
+    padding: 2px 8px;
+    margin-right: 6px;
+    cursor: pointer;
+    font-size: 0.8rem;
+  }
+  .network-note {
+    font-size: 0.8rem;
+    color: var(--text-dim);
+    margin: 0;
+    max-width: 640px;
+  }
+  .network-set {
+    border-top: 1px solid var(--panel-border);
+    padding-top: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .warning-text {
+    font-size: 0.82rem;
+    color: var(--warn);
+    margin: 0;
+    max-width: 640px;
+  }
+  .network-set input[type=text] {
+    background: #0d1318;
+    border: 1px solid var(--panel-border);
+    color: var(--text);
+    border-radius: 6px;
+    padding: 8px 10px;
+    font-size: 0.9rem;
+    width: 180px;
+  }
+  .checkbox-label, .confirm-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.85rem;
+    color: var(--text-dim);
+    cursor: pointer;
+  }
+  .network-set button {
+    align-self: flex-start;
+  }
 </style>
 </head>
 <body>
@@ -218,6 +296,43 @@
   </div>
 
   <div class="grid" id="channels"></div>
+
+  <details class="network-panel">
+    <summary>Network settings (advanced)</summary>
+    <div class="network-body">
+      <div class="network-row">
+        <button id="find-device">Find Q-Hub on network</button>
+        <span id="find-results" class="network-status"></span>
+      </div>
+      <div class="network-row">
+        <button id="query-network">Query device network config</button>
+        <span id="network-info" class="network-status"></span>
+      </div>
+      <p class="network-note">
+        Some Q-Hub units report a placeholder network config (e.g. 255.255.255.255)
+        that does not reflect their real operating address &mdash; that matches
+        OTAQ's own app, not a bug here. Don't treat the query above as ground truth.
+      </p>
+      <div class="network-set">
+        <strong>Set a new IP address</strong>
+        <p class="warning-text">
+          Changing this can make the device unreachable at its current address
+          until it's re-addressed via physical/serial access. This has been
+          verified against the protocol but not exercised on real hardware &mdash;
+          double-check the address before applying.
+        </p>
+        <div class="network-row">
+          <input id="set-ip" type="text" placeholder="192.168.1.210" spellcheck="false">
+          <label class="checkbox-label"><input type="checkbox" id="set-dhcp"> Use DHCP instead</label>
+        </div>
+        <label class="confirm-row">
+          <input type="checkbox" id="confirm-network-change">
+          I understand this may make the device unreachable and I've verified the address.
+        </label>
+        <button class="off-btn" id="apply-network" disabled>Apply new network config</button>
+      </div>
+    </div>
+  </details>
 </main>
 
 <footer>
@@ -386,6 +501,80 @@ document.getElementById("save-ip").addEventListener("click", async () => {
     headers: {"Content-Type": "application/json"},
     body: JSON.stringify({ip})
   })); } catch (e) { showError(e.message); }
+});
+
+// -- network settings (advanced) -------------------------------------------
+
+document.getElementById("find-device").addEventListener("click", async () => {
+  const btn = document.getElementById("find-device");
+  const out = document.getElementById("find-results");
+  btn.disabled = true;
+  out.textContent = "searching (a few seconds)…";
+  try {
+    const result = await api("/api/discover");
+    out.innerHTML = "";
+    if (!result.found || result.found.length === 0) {
+      out.textContent = "no Q-Hub found on this network segment";
+    } else {
+      result.found.forEach(ip => {
+        const chip = document.createElement("span");
+        chip.className = "found-ip";
+        chip.textContent = ip;
+        chip.title = "Click to use this address";
+        chip.addEventListener("click", () => {
+          document.getElementById("device-ip").value = ip;
+          document.getElementById("save-ip").click();
+        });
+        out.appendChild(chip);
+      });
+    }
+  } catch (e) {
+    out.textContent = "search failed: " + e.message;
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+document.getElementById("query-network").addEventListener("click", async () => {
+  const btn = document.getElementById("query-network");
+  const out = document.getElementById("network-info");
+  btn.disabled = true;
+  out.textContent = "querying…";
+  try {
+    const info = await api("/api/network");
+    out.textContent = `device reports: ${info.ip}, DHCP ${info.dhcp ? "on" : "off"}`;
+  } catch (e) {
+    out.textContent = "query failed: " + e.message;
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+document.getElementById("confirm-network-change").addEventListener("change", e => {
+  document.getElementById("apply-network").disabled = !e.target.checked;
+});
+
+document.getElementById("apply-network").addEventListener("click", async () => {
+  const ip = document.getElementById("set-ip").value.trim();
+  const dhcp = document.getElementById("set-dhcp").checked;
+  const confirmBox = document.getElementById("confirm-network-change");
+  if (!ip || !confirmBox.checked) return;
+  const btn = document.getElementById("apply-network");
+  btn.disabled = true;
+  try {
+    await api("/api/network", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({ip, dhcp, confirm: true})
+    });
+    document.getElementById("network-info").textContent =
+      `sent -- if the device applied it, it should now be reachable at ${ip}`;
+    confirmBox.checked = false;
+  } catch (e) {
+    showError("Set IP failed: " + e.message);
+  } finally {
+    btn.disabled = true;
+  }
 });
 
 poll();
